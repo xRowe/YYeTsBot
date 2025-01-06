@@ -72,7 +72,7 @@ def send_mail(to: str, subject: str, context: dict):
     password = os.getenv("email_password")
     host = os.getenv("email_host", "localhost")
     port = os.getenv("email_port", "1025")  # mailhog
-    from_addr = os.getenv("from_addr", "yyets@dmesg.app")
+    from_addr = os.getenv("from_addr", "hello@yyets.click")
 
     msg = MIMEText(generate_body(context), "html", "utf-8")
     msg["From"] = _format_addr("YYeTs <%s>" % from_addr)
@@ -98,7 +98,7 @@ def check_spam(ip, ua, author, content) -> int:
         return 0
     if token:
         with contextlib.suppress(Exception):
-            akismet = Akismet(token, blog="https://yyets.dmesg.app/")
+            akismet = Akismet(token, blog="https://yyets.click/")
 
             return akismet.check(
                 ip,
@@ -130,6 +130,8 @@ class Cloudflare(Redis):
         if cache:
             cache = json.loads(cache)
             logging.info("Cache found with %s IPs", len(cache))
+            if len(cache) > 10000:
+                return cache[:5000]
             return cache
         else:
             data = self.session.get(self.endpoint).json()

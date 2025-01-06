@@ -13,11 +13,9 @@ import pathlib
 import threading
 from zoneinfo import ZoneInfo
 
-import sentry_sdk
 import tornado.autoreload
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
-from sentry_sdk.integrations.tornado import TornadoIntegration
 from tornado import httpserver, ioloop, options, web
 from tornado.log import enable_pretty_logging
 
@@ -62,11 +60,11 @@ from handlers.resources import (
     NameHandler,
     ResourceHandler,
     ResourceLatestHandler,
+    SubtitleDownloadHandler,
     TopHandler,
 )
 from handlers.user import LikeHandler, UserAvatarHandler, UserEmailHandler, UserHandler
 
-sentry_sdk.init(dsn=os.getenv("DSN"), integrations=[TornadoIntegration()])
 enable_pretty_logging()
 setup_logger()
 
@@ -79,6 +77,7 @@ class RunServer:
     handlers = [
         (r"/", IndexHandler),
         (r"/api/resource", ResourceHandler),
+        (r"/api/download", SubtitleDownloadHandler),
         (r"/api/resource/latest", ResourceLatestHandler),
         (r"/api/top", TopHandler),
         (r"/api/like", LikeHandler),
@@ -195,7 +194,7 @@ if __name__ == "__main__":
      ▌   ▌  ▛▀   ▌  ▝▀▖
      ▘   ▘  ▝▀▘  ▘  ▀▀ 
                         
-     Lazarus came back from the dead. By @Bennythink
+     Lazarus came back from the dead. By @BennyThink
                 """
     print(banner)
     RunServer.run_server(port=p, host=h)

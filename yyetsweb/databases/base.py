@@ -5,27 +5,15 @@ import logging
 import os
 import time
 
-import fakeredis
 import meilisearch
-import pymongo
-import redis
 
-faker_redis = fakeredis.FakeStrictRedis()
+from databases import db, redis_client
 
 
 class Mongo:
     def __init__(self):
-        self.client = pymongo.MongoClient(
-            host=os.getenv("MONGO", "localhost"),
-            connect=False,
-            connectTimeoutMS=5000,
-            serverSelectionTimeoutMS=5000,
-        )
-        self.db = self.client["zimuzu"]
+        self.db = db
         super().__init__()
-
-    def __del__(self):
-        self.client.close()
 
     def is_admin(self, username: str) -> bool:
         data = self.db["users"].find_one({"username": username, "group": {"$in": ["admin"]}})
@@ -43,16 +31,8 @@ class Mongo:
 
 class Redis:
     def __init__(self):
-        try:
-            self.r = redis.StrictRedis(host=os.getenv("REDIS", "localhost"), decode_responses=True)
-            self.r.ping()
-        except redis.exceptions.ConnectionError:
-            logging.warning("%s Using fakeredis now... %s", "#" * 10, "#" * 10)
-            self.r = faker_redis
+        self.r = redis_client
         super().__init__()
-
-    def __del__(self):
-        self.r.close()
 
     @classmethod
     def cache(cls, timeout: int):
@@ -133,6 +113,7 @@ class SearchEngine(Mongo):
         self.yyets_index = self.search_client.index("yyets")
         self.comment_index = self.search_client.index("comment")
         self.douban_index = self.search_client.index("douban")
+        self.subtitle_index = self.search_client.index("subtitle")
         super().__init__()
 
     def __del__(self):
@@ -172,6 +153,17 @@ class SearchEngine(Mongo):
             ]
         )
 
+    def __get_subtitle(self):
+        return self.db["subtitle"].aggregate(
+            [
+                {
+                    "$addFields": {
+                        "_id": {"$toString": "$_id"},
+                    }
+                },
+            ]
+        )
+
     def add_yyets(self):
         logging.info("Adding yyets data to search engine")
         data = list(self.__get_yyets())
@@ -187,6 +179,11 @@ class SearchEngine(Mongo):
         data = list(self.__get_douban())
         self.douban_index.add_documents(data, primary_key="_id")
 
+    def add_subtitle(self):
+        logging.info("Adding subtitle data to search engine")
+        data = list(self.__get_subtitle())
+        self.subtitle_index.add_documents(data, primary_key="_id")
+
     def search_yyets(self, keyword: "str"):
         return self.yyets_index.search(keyword, {"matchingStrategy": "all"})["hits"]
 
@@ -196,11 +193,15 @@ class SearchEngine(Mongo):
     def search_douban(self, keyword: "str"):
         return self.douban_index.search(keyword, {"matchingStrategy": "all"})["hits"]
 
+    def search_subtitle(self, keyword: "str"):
+        return self.subtitle_index.search(keyword, {"matchingStrategy": "all"})["hits"]
+
     def run_import(self):
         t0 = time.time()
         self.add_yyets()
         self.add_comment()
         self.add_douban()
+        self.add_subtitle()
         logging.info(f"Import data to search engine in {time.time() - t0:.2f}s")
 
     def __monitor(self, col, fun):

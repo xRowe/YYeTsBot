@@ -84,6 +84,11 @@ class Comment(Mongo):
         self.inner_page = kwargs.get("inner_page", 1)
         self.inner_size = kwargs.get("inner_size", 5)
         comment_id = kwargs.get("comment_id")
+        sort = kwargs.get("sort")
+        if sort == "newest":
+            sort = pymongo.DESCENDING
+        else:
+            sort = pymongo.ASCENDING
 
         condition = {
             "resource_id": resource_id,
@@ -109,7 +114,7 @@ class Comment(Mongo):
             .sort("_id", pymongo.DESCENDING)
             .limit(size)
             .skip((page - 1) * size)
-        )
+        ).sort("_id", sort)
         data = list(data)
         self.find_children(data)
         self.convert_objectid(data)
@@ -222,9 +227,9 @@ class Comment(Mongo):
             # send email
             parent_comment = self.db["comment"].find_one({"_id": ObjectId(parent_comment_id)})
             if resource_id == 233:
-                link = f"https://yyets.dmesg.app/discuss#{parent_comment_id}"
+                link = f"https://yyets.click/discuss#{parent_comment_id}"
             else:
-                link = f"https://yyets.dmesg.app/resource?id={resource_id}#{parent_comment_id}"
+                link = f"https://yyets.click/resource?id={resource_id}#{parent_comment_id}"
             user_info = self.db["users"].find_one({"username": parent_comment["username"], "email.verified": True})
             if user_info:
                 subject = "[人人影视下载分享站] 你的评论有了新的回复"

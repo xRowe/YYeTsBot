@@ -1,19 +1,22 @@
 #!/usr/bin/env python3
 # coding: utf-8
-import contextlib
 import json
 import logging
 import os
 import random
 
 import pymongo
-import requests
 import zhconv
 from tqdm import tqdm
 
 from common.utils import hide_phone, ts_date
 from databases.base import Mongo, Redis, SearchEngine
 from databases.comment import CommentSearch
+
+
+class SubtitleDownload(Mongo):
+    def add_download(self, _id):
+        self.db["subtitle"].find_one_and_update({"id": _id}, {"$inc": {"downloads": 1}})
 
 
 class Resource(SearchEngine):
@@ -43,101 +46,132 @@ class Resource(SearchEngine):
         return data
 
     def search_resource(self, keyword: str, search_type: "str") -> dict:
+        # search_type: default,subtitle,douban,comment
         if os.getenv("MEILISEARCH"):
             return self.meili_search(keyword, search_type)
         else:
-            return self.mongodb_search(keyword)
+            return self.mongodb_search(keyword, search_type)
 
     def meili_search(self, keyword: "str", search_type: "str") -> dict:
-        returned = {"data": [], "comment": [], "extra": []}
-        if search_type == "default":
-            yyets = self.search_yyets(keyword)
-            comment = hide_phone(self.search_comment(keyword))
-            returned["data"] = yyets
-            returned["comment"] = comment
-            return returned
-        elif search_type == "douban":
-            douban = self.search_douban(keyword)
-            returned["data"] = douban
-            return returned
-        elif search_type == "fansub":
-            # TODO disable fansub for now
-            # fansub = self.search_extra(keyword)
-            # returned["extra"] = fansub
-            return returned
-        else:
-            return returned
+        resource_data, subtitle_data, comment_data = [], [], []
 
-    def mongodb_search(self, keyword: str) -> dict:
-        # convert any text to zh-hans - only for traditional search with MongoDB
-        keyword = zhconv.convert(keyword, "zh-hans")
+        if search_type == "resource":
+            resource_data = self.search_yyets(keyword)
 
-        zimuzu_data = []
-        returned = {"data": [], "extra": [], "comment": []}
+        if search_type == "comment":
+            comment_data = hide_phone(self.search_comment(keyword))
 
-        projection = {"_id": False, "data.info": True}
-
-        resource_data = self.db["yyets"].find(
-            {
-                "$or": [
-                    {"data.info.cnname": {"$regex": f".*{keyword}.*", "$options": "i"}},
-                    {"data.info.enname": {"$regex": f".*{keyword}.*", "$options": "i"}},
+        if search_type == "subtitle":
+            # TODO: just get data from mongodb for now.
+            subtitle_data = list(
+                self.db["subtitle"].find(
                     {
-                        "data.info.aliasname": {
-                            "$regex": f".*{keyword}.*",
-                            "$options": "i",
-                        }
+                        "$or": [
+                            {"cnname": {"$regex": f".*{keyword}.*", "$options": "i"}},
+                            {"enname": {"$regex": f".*{keyword}.*", "$options": "i"}},
+                        ]
                     },
-                ]
-            },
-            projection,
-        )
-
-        for item in resource_data:
-            item["data"]["info"]["origin"] = "yyets"
-            zimuzu_data.append(item["data"]["info"])
-
-        # get comment
-        c_search = []
-        comments = CommentSearch().get_comment(1, 2**10, keyword)
-        hide_phone(comments.get("data", []))
-        for c in comments.get("data", []):
-            comment_rid = c["resource_id"]
-            res = self.db["yyets"].find_one({"data.info.id": comment_rid}, projection={"data.info": True})
-            if res:
-                c_search.append(
-                    {
-                        "username": c["username"],
-                        "date": c["date"],
-                        "comment": c["content"],
-                        "commentID": c["id"],
-                        "resourceID": comment_rid,
-                        "resourceName": res["data"]["info"]["cnname"],
-                        "origin": "comment",
-                        "hasAvatar": c["hasAvatar"],
-                        "hash": c["hash"],
-                    }
+                    {"_id": False},
                 )
-        # zimuzu -> comment -> extra
-        if zimuzu_data:
-            returned["data"] = zimuzu_data
-        elif not c_search:
-            # only returned when no data found
-            returned["extra"] = self.search_extra(keyword)
-        # comment data will always be returned
-        returned["comment"] = c_search
-        return returned
+            )
 
-    def search_extra(self, keyword: "str") -> list:
-        order = os.getenv("ORDER", "YYeTsOffline,ZimuxiaOnline,NewzmzOnline,ZhuixinfanOnline").split(",")
-        order.pop(0)
-        extra = []
-        with contextlib.suppress(requests.exceptions.RequestException):
-            for name in order:
-                extra = self.fansub_search(name, keyword)
-                if extra:
-                    break
-        return extra
+        if search_type == "default":
+            resource_data = self.search_yyets(keyword)
+            subtitle_data = self.search_subtitle(keyword)
+            comment_data = hide_phone(self.search_comment(keyword))
+        return {
+            "resource": resource_data,
+            "subtitle": subtitle_data,
+            "comment": comment_data,
+        }
+
+    def mongodb_search(self, keyword: str, search_type: str) -> dict:
+        # search_type: default,resource,subtitle,comment default is everything
+        keyword = zhconv.convert(keyword, "zh-hans")
+        resource_data, subtitle_data, comment_data = [], [], []
+
+        def search_resource():
+            data = self.db["yyets"].find(
+                {
+                    "$or": [
+                        {
+                            "data.info.cnname": {
+                                "$regex": f".*{keyword}.*",
+                                "$options": "i",
+                            }
+                        },
+                        {
+                            "data.info.enname": {
+                                "$regex": f".*{keyword}.*",
+                                "$options": "i",
+                            }
+                        },
+                        {
+                            "data.info.aliasname": {
+                                "$regex": f".*{keyword}.*",
+                                "$options": "i",
+                            }
+                        },
+                    ]
+                },
+                {"_id": False, "data.info": True},
+            )
+
+            for item in data:
+                item["data"]["info"]["origin"] = "yyets"
+                resource_data.append(item["data"]["info"])
+
+        def search_subtitle():
+            subdata = self.db["subtitle"].find(
+                {
+                    "$or": [
+                        {"cnname": {"$regex": f".*{keyword}.*", "$options": "i"}},
+                        {"enname": {"$regex": f".*{keyword}.*", "$options": "i"}},
+                    ]
+                },
+                {"_id": False},
+            )
+            subtitle_data.extend(list(subdata))
+
+        def search_comment():
+            comments = CommentSearch().get_comment(1, 2**10, keyword)
+            hide_phone(comments.get("data", []))
+            for c in comments.get("data", []):
+                comment_rid = c["resource_id"]
+                res = self.db["yyets"].find_one({"data.info.id": comment_rid}, projection={"data.info": True})
+                if res:
+                    comment_data.append(
+                        {
+                            "username": c["username"],
+                            "date": c["date"],
+                            "comment": c["content"],
+                            "commentID": c["id"],
+                            "resourceID": comment_rid,
+                            "resourceName": res["data"]["info"]["cnname"],
+                            "origin": "comment",
+                            "hasAvatar": c["hasAvatar"],
+                            "hash": c.get("hash"),
+                        }
+                    )
+
+        if search_type == "resource":
+            search_resource()
+
+        if search_type == "comment":
+            search_comment()
+
+        if search_type == "subtitle":
+            search_subtitle()
+        if search_type == "default":
+            search_resource()
+            search_comment()
+            search_subtitle()
+
+        return {
+            "resource": resource_data,
+            "subtitle": subtitle_data,
+            "comment": comment_data,
+        }
 
     def patch_resource(self, new_data: dict):
         rid = new_data["resource_id"]
@@ -240,12 +274,10 @@ class Top(Mongo):
         return all_data
 
 
-class ResourceLatest(Mongo):
-    @staticmethod
-    def get_latest_resource() -> dict:
-        redis = Redis().r
+class ResourceLatest(Mongo, Redis):
+    def get_latest_resource(self) -> dict:
         key = "latest-resource"
-        latest = redis.get(key)
+        latest = self.r.get(key)
         if latest:
             logging.info("Cache hit for latest resource")
             latest = json.loads(latest)
@@ -253,7 +285,7 @@ class ResourceLatest(Mongo):
         else:
             logging.warning("Cache miss for latest resource")
             latest = ResourceLatest().query_db()
-            redis.set(key, json.dumps(latest, ensure_ascii=False))
+            self.r.set(key, json.dumps(latest, ensure_ascii=False))
         return latest
 
     def query_db(self) -> dict:
@@ -286,10 +318,9 @@ class ResourceLatest(Mongo):
         return dict(data=ok)
 
     def refresh_latest_resource(self):
-        redis = Redis().r
         logging.info("Getting new resources...")
         latest = self.query_db()
-        redis.set("latest-resource", json.dumps(latest, ensure_ascii=False))
+        self.r.set("latest-resource", json.dumps(latest, ensure_ascii=False))
         logging.info("latest-resource data refreshed.")
 
 

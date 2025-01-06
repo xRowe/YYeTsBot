@@ -5,14 +5,15 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/gin-gonic/gin"
-	_ "github.com/glebarez/go-sqlite"
-	log "github.com/sirupsen/logrus"
 	"io"
 	"net/http"
 	"os"
 	"path"
 	"strings"
+
+	"github.com/gin-gonic/gin"
+	_ "github.com/glebarez/go-sqlite"
+	log "github.com/sirupsen/logrus"
 )
 
 const dbFile = "yyets_sqlite.db"
@@ -129,7 +130,7 @@ func announcement(c *gin.Context) {
 		"data": []Announcement{{
 			Username: "Benny",
 			Date:     buildTime,
-			Content:  "YYeTs一键运行包 https://yyets.dmesg.app/。",
+			Content:  "YYeTs一键运行包 https://yyets.click/。",
 		}},
 	})
 }
@@ -156,7 +157,7 @@ func douban(c *gin.Context) {
 	if doubanInfo == "" {
 		var image Image
 		log.Warnf("Douban resource not found, requesting to main site ...")
-		resp, _ := http.Get("https://yyets.dmesg.app" + c.Request.URL.String())
+		resp, _ := http.Get("https://yyets.click" + c.Request.URL.String())
 		body, _ := io.ReadAll(resp.Body)
 		doubanInfo = string(body)
 		json.Unmarshal(body, &image)
@@ -216,7 +217,7 @@ func downloadDB() {
 	}
 
 	log.Infoln("Downloading database file...")
-	var downloadUrl = "https://yyets.dmesg.app/dump/yyets_sqlite.zip"
+	var downloadUrl = "https://pub-74e4c4d2953c4e9e9f32204e472bafed.r2.dev/yyets_sqlite.zip"
 	resp, _ := http.Get(downloadUrl)
 	file, _ := os.Create("yyets_sqlite.zip")
 	_, _ = io.Copy(file, resp.Body)

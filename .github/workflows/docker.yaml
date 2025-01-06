@@ -5,7 +5,6 @@ on:
       - 'master'
     paths-ignore:
       - '**.md'
-      - '**.yml'
       - 'LICENSE'
 
 jobs:
@@ -44,15 +43,6 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Run hooks
-        env:
-          REACT_APP_SENTRY_DSN: ${{ secrets.REACT_APP_SENTRY_DSN }}
-          REACT_APP_DOMAIN: ${{ secrets.REACT_APP_DOMAIN }}
-          REACT_APP_GA: ${{ secrets.REACT_APP_GA }}
-          GENERATE_SOURCEMAP: ${{ secrets.GENERATE_SOURCEMAP }}
-          REACT_APP_ADSENSE: ${{ secrets.REACT_APP_ADSENSE }}
-        run: bash scripts/pre_build.sh
-
       - name: Lower case for Docker Hub
         id: dh_string
         uses: ASzc/change-string-case-action@v5
@@ -64,34 +54,6 @@ jobs:
         uses: ASzc/change-string-case-action@v5
         with:
           string: ${{ github.event.repository.full_name }}
-
-      - name: Start MongoDB
-        uses: supercharge/mongodb-github-action@1.8.0
-        with:
-          mongodb-version: "6.0"
-
-      - name: Build CI docker images
-        uses: docker/build-push-action@v4
-        with:
-          context: .
-          # due to the limitation of docker, we can only save one platform at a time.
-          # for CI purposes, we only need to save amd64 and then build multi-arch later
-          platforms: linux/amd64
-          load: true
-          tags: |
-            ${{ steps.dh_string.outputs.lowercase }}
-          build-args: |
-            env=dev
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Restore database and run tests
-        run: |
-          sudo apt update && sudo apt install -y wget
-          wget -q https://fastdl.mongodb.org/tools/db/mongodb-database-tools-ubuntu2204-x86_64-100.6.1.deb
-          sudo dpkg -i mongodb-database-tools-ubuntu2204-x86_64-100.6.1.deb
-          mongorestore --gzip --archive=assets/ci.gz
-          make ci-test
 
       - name: Build and push docker images
         uses: docker/build-push-action@v4
